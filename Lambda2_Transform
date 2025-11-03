@@ -1,0 +1,39 @@
+# app.py (transform without pandas - outputs CSV)
+import json, os, boto3, csv
+from io import StringIO
+from datetime import datetime
+
+s3 = boto3.client('s3')
+BUCKET = os.environ['BUCKET_NAME']
+
+def lambda_handler(event, context):
+    record = event['Records'][0]
+    src_bucket = record['s3']['bucket']['name']
+    key = record['s3']['object']['key']
+
+    obj = s3.get_object(Bucket=src_bucket, Key=key)
+    content = obj['Body'].read().decode('utf-8')
+    data = json.loads(content)
+
+    # Filter out nulls and prepare rows
+    rows = []
+    for item in data:
+        if not item.get("temp_c") and item.get("temp_c") != 0:
+            continue
+        rows.append({
+            "city": item.get("city",""),
+            "temperature_c": item.get("temp_c"),
+            "humidity": item.get("humidity"),
+            "weather": item.get("weather",""),
+            "timestamp": item.get("timestamp","")
+        })
+
+    # Write CSV into memory
+    csv_buffer = StringIO()
+    writer = csv.DictWriter(csv_buffer, fieldnames=["city","temperature_c","humidity","weather","timestamp"])
+    writer.writeheader()
+    writer.writerows(rows)
+    out_key = f"weather/clean/weather_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    s3.put_object(Bucket=BUCKET, Key=out_key, Body=csv_buffer.getvalue().encode('utf-8'))
+
+    return {"status":"ok","out_key":out_key}
